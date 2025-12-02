@@ -1,5 +1,7 @@
 import pygame
 import math
+import copy
+import time
 import heapq
 import random
 from collections import deque
@@ -199,6 +201,79 @@ class DijkstraAgent(Agent):
         return best_move
 
 
+class MCTSAgent(Agent):
+    def __init__(self, iterations=1000):
+        self.iterations = iterations
+
+    def get_move(self, board, player_color):
+        root = MCTSNode()
+        root.untried_moves = self.get_legal_moves(board)
+
+        # Clone board once to avoid deepcopy overhead in loop?
+        # Actually, deepcopy is safest for Python prototypes.
+
+        start_time = time.time()
+        for _ in range(self.iterations):
+            node = root
+            simulation_board = copy.deepcopy(board)  # Heavy, but safe
+
+            # 1. SELECTION
+            # Walk down the tree until we find a node that has untried moves
+            # or is terminal.
+            while node.untried_moves == [] and node.children:
+                node = node.uct_select_child()
+                simulation_board.place_stone(node.move[0], node.move[1])
+
+            # 2. EXPANSION
+            # If we can expand (add a new child), do it.
+            if node.untried_moves:
+                m = node.untried_moves.pop()
+                simulation_board.place_stone(m[0], m[1])
+                new_node = MCTSNode(parent=node, move=m)
+                new_node.untried_moves = self.get_legal_moves(simulation_board)
+                node.children.append(new_node)
+                node = new_node
+
+            # 3. SIMULATION (Rollout)
+            # Play randomly until game ends
+            temp_turn = simulation_board.turn
+            while simulation_board.winner is None:
+                moves = self.get_legal_moves(simulation_board)
+                if not moves: break
+                rm = random.choice(moves)
+                simulation_board.place_stone(rm[0], rm[1])
+
+            # 4. BACKPROPAGATION
+            # Check who won the simulation
+            won = (simulation_board.winner == player_color)
+            while node is not None:
+                node.visits += 1
+                if won:
+                    node.wins += 1
+                # If the opponent moved here, and we won, it's bad for them (optional inversion logic)
+                # Standard MCTS often flips perspective, but simplest is:
+                # Did 'player_color' win this end state? If yes, increment wins.
+                node = node.parent
+
+        # Choose the move with the most visits (most robust)
+        # Sort children by visits
+        if not root.children:
+            return random.choice(self.get_legal_moves(board))
+
+        best_child = sorted(root.children, key=lambda c: c.visits)[-1]
+        return best_child.move
+
+    def get_legal_moves(self, board):
+        moves = []
+        for r in range(board.size):
+            for c in range(board.size):
+                if board.board[r][c] == 0:
+                    moves.append((r, c))
+        return moves
+
+
+
+
 # --- UI CLASS ---
 class HexUI:
     def __init__(self, game):
@@ -300,26 +375,41 @@ class HexUI:
         running = True
         clock = pygame.time.Clock()
         # --- AGENT SELECTION ---
+        p1_agent = DijkstraAgent() 
+        p2_agent = MCTSAgent(iterations=1000)     
         # ai_agent = DijkstraAgent()
-        ai_agent = RandomAgent()
-        ai_player = 2       # Blue
-        human_player = 1    # Red
+        ai_agent = MCTSAgent(iterations=10000)  # Red (Top-Bottom)
+        ai_player = 1       # Blue
+        human_player = 2    # Red
 
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.MOUSEBUTTONDOWN:
-                    if self.game.turn == human_player and not self.game.winner:
-                        mx, my = pygame.mouse.get_pos()
-                        r, c = self.pixel_to_hex(mx, my)
-                        if 0 <= r < self.game.size and 0 <= c < self.game.size:
-                            self.game.place_stone(r, c)
+            #     elif event.type == pygame.MOUSEBUTTONDOWN:
+            #         if self.game.turn == human_player and not self.game.winner:
+            #             mx, my = pygame.mouse.get_pos()
+            #             r, c = self.pixel_to_hex(mx, my)
+            #             if 0 <= r < self.game.size and 0 <= c < self.game.size:
+            #                 self.game.place_stone(r, c)
+            #
+            # if self.game.turn == ai_player and not self.game.winner:
+            #     self.draw()  # Show "Thinking..."
+            #     pygame.time.wait(300)  # Small delay for visual feedback
+            #     move = ai_agent.get_move(self.game, ai_player)
+            #     if move:
+            #         self.game.place_stone(move[0], move[1])
 
-            if self.game.turn == ai_player and not self.game.winner:
-                self.draw()  # Show "Thinking..."
-                pygame.time.wait(300)  # Small delay for visual feedback
-                move = ai_agent.get_move(self.game, ai_player)
+            # AUTOMATED TURNS
+            if not self.game.winner:
+                # Add delay to watch the game unfold
+                pygame.time.wait(100)
+
+                if self.game.turn == 1:
+                    move = p1_agent.get_move(self.game, 1)
+                else:
+                    move = p2_agent.get_move(self.game, 2)
+
                 if move:
                     self.game.place_stone(move[0], move[1])
 
@@ -328,6 +418,33 @@ class HexUI:
 
         pygame.quit()
 
+
+class MCTSNode:
+    def __init__(self, parent=None, move=None):
+        self.parent = parent
+        self.move = move  # The move that led to this node (r, c)
+        self.children = []
+        self.wins = 0
+        self.visits = 0
+        self.untried_moves = None  # Will be populated on expansion
+
+    def uct_select_child(self, exploration_weight=1.41):
+        """
+        Selects a child using the UCB1 formula:
+        WinRate + Exploration * sqrt(ln(ParentVisits) / ChildVisits)
+        """
+        best_score = -float('inf')
+        best_child = None
+
+        for child in self.children:
+            exploit = child.wins / child.visits
+            explore = math.sqrt(math.log(self.visits) / child.visits)
+            score = exploit + exploration_weight * explore
+
+            if score > best_score:
+                best_score = score
+                best_child = child
+        return best_child
 
 if __name__ == "__main__":
     game = HexBoard(BOARD_SIZE)
