@@ -1,4 +1,5 @@
 import time
+import matplotlib.pyplot as plt
 from hex_ui import HexBoard, RandomAgent, DijkstraAgent, MCTSAgent
 
 
@@ -10,25 +11,55 @@ def play_match(p1_agent, p2_agent, size=9):
     board = HexBoard(size)
 
     while board.winner is None:
-        # Determine current player and agent
         current_player = board.turn
         agent = p1_agent if current_player == 1 else p2_agent
 
-        # Get move
         move = agent.get_move(board, current_player)
 
-        # Handle resignation or error
         if move is None:
-            print(f"Player {current_player} has no moves left!")
-            return 3 - current_player  # The other player wins
+            return 3 - current_player  # Current player has no moves left
 
-        # Apply move
         board.place_stone(move[0], move[1])
 
     return board.winner
 
 
-def run_tournament(agent1_cls, agent1_name, agent2_cls, agent2_name, num_games=100, board_size=9):
+def plot_results(p1_name, p1_wins, p2_name, p2_wins):
+    """
+    Creates a window with a Pie Chart and a Bar Chart of the results.
+    """
+    labels = [f'{p1_name} (P1)', f'{p2_name} (P2)']
+    wins = [p1_wins, p2_wins]
+    colors = ['#ff6666', '#6666ff']  # Red and Blue
+
+    # Create a figure with 2 subplots (side by side)
+    plt.figure(figsize=(12, 6))
+
+    # 1. Pie Chart
+    plt.subplot(1, 2, 1)
+    plt.pie(wins, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90, shadow=True)
+    plt.title(f'Win Rate Distribution\n({sum(wins)} Games)', loc="left")
+
+    # 2. Bar Chart
+    plt.subplot(1, 2, 2)
+    bars = plt.bar(labels, wins, color=colors)
+    plt.title('Total Games Won')
+    plt.ylabel('Wins')
+    plt.ylim(0, sum(wins) + 1)  # Set y-axis limit slightly above total games
+
+    # Add numbers on top of bars
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width() / 2., height,
+                 f'{int(height)}',
+                 ha='center', va='bottom')
+
+    plt.suptitle(f'Tournament Results: {p1_name} vs {p2_name}', fontsize=16)
+    plt.tight_layout()
+    plt.show()
+
+
+def run_tournament(agent1_cls, agent1_name, agent2_cls, agent2_name, num_games=100, board_size=9, visualize=True):
     print(f"--- STARTING TOURNAMENT: {agent1_name} vs {agent2_name} ---")
     print(f"Board Size: {board_size}x{board_size} | Games: {num_games}")
 
@@ -37,13 +68,9 @@ def run_tournament(agent1_cls, agent1_name, agent2_cls, agent2_name, num_games=1
     start_time = time.time()
 
     for i in range(num_games):
-        # Instantiate fresh agents for each game (important for MCTS tree reset)
-        # You can adjust MCTS iterations here, e.g., MCTSAgent(iterations=500)
         p1 = agent1_cls()
         p2 = agent2_cls()
 
-        # Swap colors every game to ensure fairness?
-        # For this function, let's keep Agent 1 as Red (P1) always to measure First Player Advantage.
         winner = play_match(p1, p2, board_size)
 
         if winner == 1:
@@ -51,41 +78,43 @@ def run_tournament(agent1_cls, agent1_name, agent2_cls, agent2_name, num_games=1
         else:
             p2_wins += 1
 
-        # Progress bar (optional)
+        # Simple progress indicator
         if (i + 1) % 10 == 0:
-            print(f"Completed {i + 1}/{num_games} games...")
+            print(f"Progress: {i + 1}/{num_games} games finished...")
 
     total_time = time.time() - start_time
 
     print("\n--- RESULTS ---")
-    print(f"{agent1_name} (Red/First) Wins: {p1_wins} ({p1_wins / num_games * 100:.1f}%)")
-    print(f"{agent2_name} (Blue/Second) Wins: {p2_wins} ({p2_wins / num_games * 100:.1f}%)")
+    print(f"{agent1_name} (Red): {p1_wins} wins")
+    print(f"{agent2_name} (Blue): {p2_wins} wins")
     print(f"Total Time: {total_time:.2f}s")
-    print(f"Avg Time per Game: {total_time / num_games:.2f}s")
     print("------------------------------------------------\n")
+
+    if visualize:
+        plot_results(agent1_name, p1_wins, agent2_name, p2_wins)
 
 
 if __name__ == "__main__":
+    MCTS_ITERATIONS = 1000
+
     # EXPERIMENT 1: BASELINE
     # Check if Random vs Random is roughly 50/50 (or shows 1st player advantage)
-    run_tournament(RandomAgent, "Random", RandomAgent, "Random", num_games=100)
+    # This usually shows a slight advantage for Player 1 (Red)
+    run_tournament(RandomAgent, "Random", RandomAgent, "Random", num_games=50, visualize=True)
 
     # EXPERIMENT 2: INTELLIGENCE CHECK
     # Dijkstra should completely destroy Random
-    run_tournament(DijkstraAgent, "Dijkstra", RandomAgent, "Random", num_games=50)
+    run_tournament(DijkstraAgent, "Dijkstra", RandomAgent, "Random", num_games=20, visualize=True)
 
     # EXPERIMENT 3: THE MAIN EVENT
     # MCTS vs Dijkstra.
     # Note: MCTS is slower, so we run fewer games.
-    # To pass arguments like iterations, you might need a lambda or wrapper class,
-    # but for now assume default iterations in your class or modify the loop above.
-    print("Running Heavyweight Match (MCTS vs Dijkstra)...")
 
-
-    # Custom wrapper to increase MCTS power
+    # Custom MCTS wrapper for stronger AI
     class StrongMCTS(MCTSAgent):
         def __init__(self):
-            super().__init__(iterations=1000)
+            super().__init__(iterations=MCTS_ITERATIONS)
 
 
-    run_tournament(StrongMCTS, "MCTS (1k)", DijkstraAgent, "Dijkstra", num_games=20)
+    print("Running Heavyweight Match (MCTS vs Dijkstra)...")
+    run_tournament(StrongMCTS, f"MCTS (it.: {MCTS_ITERATIONS})", DijkstraAgent, "Dijkstra", num_games=10, visualize=True)
