@@ -84,6 +84,21 @@ class Agent:
     def get_move(self, board, player_color):
         raise NotImplementedError
 
+class RandomAgent(Agent):
+    """
+    Baseline AI: Selects a move completely at random from available empty spots.
+    """
+
+    def get_move(self, board, player_color):
+        empty_cells = []
+        for r in range(board.size):
+            for c in range(board.size):
+                if board.board[r][c] == 0:
+                    empty_cells.append((r, c))
+
+        if not empty_cells:
+            return None
+        return random.choice(empty_cells)
 
 class DijkstraAgent(Agent):
     """
@@ -284,9 +299,11 @@ class HexUI:
     def run(self):
         running = True
         clock = pygame.time.Clock()
-        ai_agent = DijkstraAgent()
-        ai_player = 2
-        human_player = 1
+        # --- AGENT SELECTION ---
+        # ai_agent = DijkstraAgent()
+        ai_agent = RandomAgent()
+        ai_player = 2       # Blue
+        human_player = 1    # Red
 
         while running:
             for event in pygame.event.get():
